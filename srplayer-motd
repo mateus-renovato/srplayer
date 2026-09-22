@@ -540,11 +540,6 @@ if command -v docker >/dev/null 2>&1; then
 fi
 
 # ============================================================
-# UPDATES
-#
-# apt-check e instantaneo. "apt list --upgradable" do V7
-# travava o login por varios segundos.
-# ============================================================
 
 UPDATES=0
 SECURITY=0
