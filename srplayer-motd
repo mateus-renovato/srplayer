@@ -1,0 +1,742 @@
+#!/bin/bash
+
+# ============================================================
+# SRPLAYER V8
+# ============================================================
+
+# UTF-8 garante que ${#var} conte CARACTERES e nao BYTES.
+# Sem isso, as bordas das caixas saem desalinhadas.
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
+
+RESET='\033[0m'
+BOLD='\033[1m'
+
+BLUE='\033[38;5;33m'
+CYAN='\033[38;5;51m'
+GREEN='\033[38;5;46m'
+YELLOW='\033[38;5;226m'
+ORANGE='\033[38;5;208m'
+RED='\033[38;5;196m'
+PURPLE='\033[38;5;135m'
+GRAY='\033[38;5;245m'
+WHITE='\033[38;5;255m'
+
+# ============================================================
+# LOGIN REAL
+# ============================================================
+
+LOGIN_USER=$(id -un 2>/dev/null)
+[ -z "$LOGIN_USER" ] && LOGIN_USER="${USER:-unknown}"
+
+HOSTNAME=$(hostname)
+
+# ============================================================
+# DIMENSOES
+#
+# Caixa = 42 colunas (40 internas + 2 bordas)
+# Espaco = 6 colunas
+# Total = 90 colunas
+# Cabecalho = 90 colunas (88 internas + 2 bordas)
+# ============================================================
+
+INNER=40
+HDR_INNER=88
+GAP="      "
+
+# ============================================================
+# CORES DE RECURSO
+# ============================================================
+
+bar_color() {
+    local VALUE=${1%.*}
+
+    if [ "$VALUE" -lt 50 ]; then
+        echo "$CYAN"
+    elif [ "$VALUE" -lt 70 ]; then
+        echo "$GREEN"
+    elif [ "$VALUE" -lt 90 ]; then
+        echo "$YELLOW"
+    else
+        echo "$RED"
+    fi
+}
+
+temp_color() {
+    local VALUE=${1%.*}
+
+    if [ "$VALUE" -lt 60 ]; then
+        echo "$GREEN"
+    elif [ "$VALUE" -lt 75 ]; then
+        echo "$YELLOW"
+    elif [ "$VALUE" -lt 90 ]; then
+        echo "$ORANGE"
+    else
+        echo "$RED"
+    fi
+}
+
+# ============================================================
+# BARRA
+# ============================================================
+
+make_bar() {
+    local VALUE=${1%.*}
+    local COLOR="$2"
+    local WIDTH=14
+
+    [ -z "$VALUE" ] && VALUE=0
+    [ "$VALUE" -lt 0 ] 2>/dev/null && VALUE=0
+    [ "$VALUE" -gt 100 ] 2>/dev/null && VALUE=100
+
+    local FILLED=$((VALUE*WIDTH/100))
+    local EMPTY=$((WIDTH-FILLED))
+
+    local BAR=""
+    local i
+
+    for ((i=0; i<FILLED; i++)); do BAR+="█"; done
+    for ((i=0; i<EMPTY;  i++)); do BAR+="░"; done
+
+    printf '%b[%s]%b' "$COLOR" "$BAR" "$RESET"
+}
+
+# ============================================================
+# PADDING
+# ============================================================
+
+strip_ansi() {
+    printf '%b' "$1" | sed $'s/\033\\[[0-9;]*m//g'
+}
+
+pad_text() {
+    local TEXT="$1"
+    local WIDTH="$2"
+
+    local CLEAN
+    local LEN
+
+    CLEAN=$(strip_ansi "$TEXT")
+    LEN=${#CLEAN}
+
+    if [ "$LEN" -gt "$WIDTH" ]; then
+        # corta pelo texto limpo para nao quebrar codigos de cor
+        printf '%s' "${CLEAN:0:$WIDTH}"
+        return
+    fi
+
+    printf '%b' "$TEXT"
+    printf '%*s' $((WIDTH-LEN)) ""
+}
+
+pad_center() {
+    local TEXT="$1"
+    local WIDTH="$2"
+
+    local CLEAN
+    local LEN
+    local L
+    local R
+
+    CLEAN=$(strip_ansi "$TEXT")
+    LEN=${#CLEAN}
+
+    if [ "$LEN" -ge "$WIDTH" ]; then
+        printf '%s' "${CLEAN:0:$WIDTH}"
+        return
+    fi
+
+    L=$(( (WIDTH-LEN)/2 ))
+    R=$(( WIDTH-LEN-L ))
+
+    printf '%*s' "$L" ""
+    printf '%b' "$TEXT"
+    printf '%*s' "$R" ""
+}
+
+# ============================================================
+# CAIXAS
+# ============================================================
+
+hline() {
+    local W="$1"
+    local i
+    for ((i=0; i<W; i++)); do printf '─'; done
+}
+
+box_top() {
+    local W="${1:-$INNER}"
+    printf '┌'; hline "$W"; printf '┐'
+}
+
+box_mid() {
+    local W="${1:-$INNER}"
+    printf '├'; hline "$W"; printf '┤'
+}
+
+box_bottom() {
+    local W="${1:-$INNER}"
+    printf '└'; hline "$W"; printf '┘'
+}
+
+box_line() {
+    local W="${2:-$INNER}"
+    printf '│'
+    pad_text "$1" "$W"
+    printf '│'
+}
+
+box_line_center() {
+    local W="${2:-$INNER}"
+    printf '│'
+    pad_center "$1" "$W"
+    printf '│'
+}
+
+# ============================================================
+# RENDER DUAS CAIXAS
+#
+# ATENCAO: os nomes das variaveis locais aqui dentro NAO podem
+# ser iguais aos nomes dos arrays passados por parametro.
+# Era esse o bug do V7: "local LEFT" mascarava o array global
+# LEFT e as caixas SISTEMA / RECURSOS saiam vazias.
+# ============================================================
+
+render_pair() {
+
+    local __T1="$1"
+    local __T2="$2"
+
+    local -n __A1="$3"
+    local -n __A2="$4"
+
+    local __C1=${#__A1[@]}
+    local __C2=${#__A2[@]}
+
+    local __MAX=$__C1
+    [ "$__C2" -gt "$__MAX" ] && __MAX=$__C2
+    [ "$__MAX" -lt 1 ] && __MAX=1
+
+    # TOPO
+    printf "%b" "$BLUE"
+    box_top
+    printf "%s" "$GAP"
+    box_top
+    printf "%b\n" "$RESET"
+
+    # TITULOS
+    printf "%b" "$BLUE"
+    box_line "${CYAN}${BOLD} $__T1${RESET}"
+    printf "%s" "$GAP"
+    box_line "${CYAN}${BOLD} $__T2${RESET}"
+    printf "%b\n" "$RESET"
+
+    # DIVISAO
+    printf "%b" "$BLUE"
+    box_mid
+    printf "%s" "$GAP"
+    box_mid
+    printf "%b\n" "$RESET"
+
+    # CONTEUDO
+    local __i
+    local __L
+    local __R
+
+    for ((__i=0; __i<__MAX; __i++)); do
+
+        if [ "$__i" -lt "$__C1" ]; then
+            __L="${__A1[$__i]}"
+        else
+            __L=""
+        fi
+
+        if [ "$__i" -lt "$__C2" ]; then
+            __R="${__A2[$__i]}"
+        else
+            __R=""
+        fi
+
+        printf "%b" "$BLUE"
+        box_line "$__L"
+        printf "%b" "$RESET"
+
+        printf "%s" "$GAP"
+
+        printf "%b" "$BLUE"
+        box_line "$__R"
+        printf "%b\n" "$RESET"
+
+    done
+
+    # FUNDO
+    printf "%b" "$BLUE"
+    box_bottom
+    printf "%s" "$GAP"
+    box_bottom
+    printf "%b\n" "$RESET"
+}
+
+# ============================================================
+# SERVICOS
+# ============================================================
+
+service_status() {
+
+    local SERVICE="$1"
+
+    if ! systemctl list-unit-files "${SERVICE}.service" --no-legend 2>/dev/null | grep -q .; then
+        printf '%b' "${GRAY}NÃO INSTALADO${RESET}"
+        return
+    fi
+
+    if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+        printf '%b' "${GREEN}ONLINE${RESET}"
+    else
+        printf '%b' "${RED}OFFLINE${RESET}"
+    fi
+}
+
+# ============================================================
+# SISTEMA
+# ============================================================
+
+OS=$(grep '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d= -f2- | tr -d '"')
+KERNEL=$(uname -r)
+UPTIME=$(uptime -p 2>/dev/null | sed 's/^up //' | cut -c1-26)
+PROCS=$(ps -e --no-headers 2>/dev/null | wc -l)
+USERS=$(who 2>/dev/null | wc -l)
+
+read -r LOAD1 LOAD5 LOAD15 _ < /proc/loadavg
+
+# ============================================================
+# AMOSTRAGEM UNICA
+#
+# Uma unica pausa coleta CPU total, CPU por nucleo e rede.
+# No V7 eram varias pausas somadas (login lento).
+# ============================================================
+
+IFACE=$(ip route 2>/dev/null | awk '/^default/ {print $5; exit}')
+[ -z "$IFACE" ] && IFACE=$(ls /sys/class/net 2>/dev/null | grep -v '^lo$' | head -1)
+[ -z "$IFACE" ] && IFACE="lo"
+
+cpu_snapshot() {
+    awk '/^cpu/ {
+        idle=$5+$6
+        total=0
+        for (i=2; i<=NF; i++) total+=$i
+        print $1, total, idle
+    }' /proc/stat
+}
+
+net_snapshot() {
+    awk -v IF="${IFACE}:" '$1==IF {print $2, $10}' /proc/net/dev
+}
+
+declare -A T1 I1 T2 I2
+
+while read -r NAME TOT IDL; do
+    T1[$NAME]=$TOT
+    I1[$NAME]=$IDL
+done < <(cpu_snapshot)
+
+read -r RX1 TX1 < <(net_snapshot)
+[ -z "$RX1" ] && RX1=0
+[ -z "$TX1" ] && TX1=0
+
+sleep 0.4
+
+while read -r NAME TOT IDL; do
+    T2[$NAME]=$TOT
+    I2[$NAME]=$IDL
+done < <(cpu_snapshot)
+
+read -r RX2 TX2 < <(net_snapshot)
+[ -z "$RX2" ] && RX2=$RX1
+[ -z "$TX2" ] && TX2=$TX1
+
+cpu_usage() {
+    local KEY="$1"
+    local D=$(( ${T2[$KEY]:-0} - ${T1[$KEY]:-0} ))
+    local ID=$(( ${I2[$KEY]:-0} - ${I1[$KEY]:-0} ))
+
+    if [ "$D" -gt 0 ]; then
+        echo $(( 100*(D-ID)/D ))
+    else
+        echo 0
+    fi
+}
+
+CPU_AVG=$(cpu_usage cpu)
+CPU_COLOR=$(bar_color "$CPU_AVG")
+
+CPU_COUNT=$(nproc)
+
+CORE_LINES=()
+
+for ((i=0; i<CPU_COUNT; i++)); do
+    USAGE=$(cpu_usage "cpu$i")
+    CORE_COLOR=$(bar_color "$USAGE")
+    CORE_LINES+=(
+        "$(printf ' CPU%-2s : ' "$i")$(make_bar "$USAGE" "$CORE_COLOR") $(printf '%3s%%' "$USAGE")"
+    )
+done
+
+# ============================================================
+# REDE
+# ============================================================
+
+IP=$(ip -4 addr show "$IFACE" 2>/dev/null | awk '/inet / {print $2; exit}')
+[ -z "$IP" ] && IP="N/A"
+
+GATEWAY=$(ip route 2>/dev/null | awk '/^default/ {print $3; exit}')
+[ -z "$GATEWAY" ] && GATEWAY="N/A"
+
+MAC=$(cat "/sys/class/net/$IFACE/address" 2>/dev/null)
+[ -z "$MAC" ] && MAC="N/A"
+
+SPEED="N/A"
+
+if [ -r "/sys/class/net/$IFACE/speed" ]; then
+    SPEED_RAW=$(cat "/sys/class/net/$IFACE/speed" 2>/dev/null)
+    if [ -n "$SPEED_RAW" ] && [ "$SPEED_RAW" -gt 0 ] 2>/dev/null; then
+        SPEED="${SPEED_RAW} Mb/s"
+    fi
+fi
+
+# Wi-Fi nao expoe /speed. Tenta o bitrate real.
+if [ "$SPEED" = "N/A" ] && command -v iw >/dev/null 2>&1; then
+    WIFI_RATE=$(iw dev "$IFACE" link 2>/dev/null | awk '/bitrate/ {print $3" Mb/s"; exit}')
+    [ -n "$WIFI_RATE" ] && SPEED="$WIFI_RATE"
+fi
+
+# janela de 0.4s -> Kbps = delta_bytes * 8 / 400
+RX_RATE=$(( (RX2-RX1)*8/400 ))
+TX_RATE=$(( (TX2-TX1)*8/400 ))
+
+[ "$RX_RATE" -lt 0 ] && RX_RATE=0
+[ "$TX_RATE" -lt 0 ] && TX_RATE=0
+
+if [ "$RX_RATE" -ge 1000 ]; then
+    RX_DISPLAY=$(awk "BEGIN {printf \"%.1f Mbps\", $RX_RATE/1000}")
+else
+    RX_DISPLAY="${RX_RATE} Kbps"
+fi
+
+if [ "$TX_RATE" -ge 1000 ]; then
+    TX_DISPLAY=$(awk "BEGIN {printf \"%.1f Mbps\", $TX_RATE/1000}")
+else
+    TX_DISPLAY="${TX_RATE} Kbps"
+fi
+
+# ============================================================
+# RAM / SWAP
+# ============================================================
+
+read -r RAM_TOTAL RAM_USED < <(free -m | awk '/^Mem:/ {print $2, $3}')
+read -r SWAP_TOTAL SWAP_USED < <(free -m | awk '/^Swap:/ {print $2, $3}')
+
+[ -z "$RAM_TOTAL" ] && RAM_TOTAL=0
+[ -z "$SWAP_TOTAL" ] && SWAP_TOTAL=0
+
+if [ "$RAM_TOTAL" -gt 0 ]; then
+    RAM_PERCENT=$((100*RAM_USED/RAM_TOTAL))
+else
+    RAM_PERCENT=0
+fi
+
+if [ "$SWAP_TOTAL" -gt 0 ]; then
+    SWAP_PERCENT=$((100*SWAP_USED/SWAP_TOTAL))
+else
+    SWAP_PERCENT=0
+fi
+
+RAM_COLOR=$(bar_color "$RAM_PERCENT")
+SWAP_COLOR=$(bar_color "$SWAP_PERCENT")
+
+# ============================================================
+# DISCO
+# ============================================================
+
+read -r DISK_TOTAL DISK_USED DISK_FREE DISK_PERCENT < <(
+    df -h -P / | awk 'NR==2 {gsub("%","",$5); print $2, $3, $4, $5}'
+)
+
+[ -z "$DISK_PERCENT" ] && DISK_PERCENT=0
+
+DISK_COLOR=$(bar_color "$DISK_PERCENT")
+
+# ============================================================
+# TEMPERATURA
+# ============================================================
+
+TEMP="N/A"
+
+# 1) hwmon com sensor de CPU conhecido
+for HW in /sys/class/hwmon/hwmon*; do
+    [ -r "$HW/name" ] || continue
+    NAME=$(cat "$HW/name" 2>/dev/null)
+    case "$NAME" in
+        coretemp|k10temp|zenpower|cpu_thermal|acpitz)
+            RAW=$(cat "$HW/temp1_input" 2>/dev/null)
+            if [ -n "$RAW" ] && [ "$RAW" -gt 0 ] 2>/dev/null; then
+                TEMP=$((RAW/1000))
+                break
+            fi
+            ;;
+    esac
+done
+
+# 2) fallback: thermal zones
+if [ "$TEMP" = "N/A" ]; then
+    for ZONE in /sys/class/thermal/thermal_zone*/temp; do
+        [ -r "$ZONE" ] || continue
+        RAW=$(cat "$ZONE" 2>/dev/null)
+        if [ -n "$RAW" ] && [ "$RAW" -gt 0 ] 2>/dev/null; then
+            TEMP=$((RAW/1000))
+            break
+        fi
+    done
+fi
+
+if [ "$TEMP" != "N/A" ]; then
+    TEMP_COLOR=$(temp_color "$TEMP")
+    TEMP_DISPLAY="${TEMP} C"
+else
+    TEMP_COLOR="$GRAY"
+    TEMP_DISPLAY="N/A"
+fi
+
+# ============================================================
+# SERVICOS
+# ============================================================
+
+if systemctl list-unit-files 2>/dev/null | grep -q '^ssh\.service'; then
+    SSH_SERVICE="ssh"
+else
+    SSH_SERVICE="sshd"
+fi
+
+SSH_STATUS=$(service_status "$SSH_SERVICE")
+DOCKER_STATUS=$(service_status "docker")
+APACHE_STATUS=$(service_status "apache2")
+NGINX_STATUS=$(service_status "nginx")
+FIREWALL_STATUS=$(service_status "ufw")
+
+# ============================================================
+# DOCKER
+# ============================================================
+
+DOCKER_COUNT=0
+DOCKER_RUNNING=0
+DOCKER_OK=0
+
+if command -v docker >/dev/null 2>&1; then
+    if timeout 2 docker info >/dev/null 2>&1; then
+        DOCKER_OK=1
+        DOCKER_COUNT=$(timeout 2 docker ps -a -q 2>/dev/null | wc -l)
+        DOCKER_RUNNING=$(timeout 2 docker ps -q 2>/dev/null | wc -l)
+    fi
+fi
+
+# ============================================================
+# UPDATES
+#
+# apt-check e instantaneo. "apt list --upgradable" do V7
+# travava o login por varios segundos.
+# ============================================================
+
+UPDATES=0
+SECURITY=0
+
+if [ -x /usr/lib/update-notifier/apt-check ]; then
+    read -r UPDATES SECURITY < <(
+        /usr/lib/update-notifier/apt-check 2>&1 | tr ';' ' '
+    )
+fi
+
+[[ "$UPDATES"  =~ ^[0-9]+$ ]] || UPDATES=0
+[[ "$SECURITY" =~ ^[0-9]+$ ]] || SECURITY=0
+
+if [ "$UPDATES" -gt 0 ]; then
+    UPDATES_COLOR="$YELLOW"
+else
+    UPDATES_COLOR="$GREEN"
+fi
+
+if [ "$SECURITY" -gt 0 ]; then
+    SECURITY_COLOR="$RED"
+else
+    SECURITY_COLOR="$GREEN"
+fi
+
+# ============================================================
+# REBOOT
+# ============================================================
+
+if [ -f /var/run/reboot-required ]; then
+    REBOOT="${YELLOW}SIM${RESET}"
+else
+    REBOOT="${GREEN}NÃO${RESET}"
+fi
+
+# ============================================================
+# ARRAYS
+# ============================================================
+
+SYS_LEFT=()
+SYS_LEFT+=(" OS        : $OS")
+SYS_LEFT+=(" Kernel    : $KERNEL")
+SYS_LEFT+=(" Uptime    : $UPTIME")
+SYS_LEFT+=(" Processos : $PROCS")
+SYS_LEFT+=(" Usuários  : $USERS")
+SYS_LEFT+=(" Data      : $(date '+%d/%m/%Y %H:%M')")
+
+RES_RIGHT=()
+RES_RIGHT+=(" CPU   : $(make_bar "$CPU_AVG" "$CPU_COLOR") $(printf '%3s%%' "$CPU_AVG")")
+RES_RIGHT+=(" RAM   : $(make_bar "$RAM_PERCENT" "$RAM_COLOR") $(printf '%3s%%' "$RAM_PERCENT")")
+RES_RIGHT+=(" SWAP  : $(make_bar "$SWAP_PERCENT" "$SWAP_COLOR") $(printf '%3s%%' "$SWAP_PERCENT")")
+RES_RIGHT+=(" DISCO : $(make_bar "$DISK_PERCENT" "$DISK_COLOR") $(printf '%3s%%' "$DISK_PERCENT")")
+RES_RIGHT+=(" MEM   : ${CYAN}${RAM_USED}${RESET} / ${CYAN}${RAM_TOTAL}${RESET} MB")
+RES_RIGHT+=(" TEMP  : ${TEMP_COLOR}${TEMP_DISPLAY}${RESET}")
+RES_RIGHT+=(" LOAD  : ${CYAN}${LOAD1}${RESET} / ${CYAN}${LOAD5}${RESET} / ${CYAN}${LOAD15}${RESET}")
+
+CPU_BOX=()
+for LINE in "${CORE_LINES[@]}"; do
+    CPU_BOX+=("$LINE")
+done
+CPU_BOX+=(" MEDIA : $(make_bar "$CPU_AVG" "$CPU_COLOR") $(printf '%3s%%' "$CPU_AVG")")
+CPU_BOX+=(" CPUs  : ${CYAN}${CPU_COUNT}${RESET} núcleo(s)")
+
+DISK_BOX=()
+DISK_BOX+=(" Total : $DISK_TOTAL")
+DISK_BOX+=(" Usado : $DISK_USED")
+DISK_BOX+=(" Livre : $DISK_FREE")
+DISK_BOX+=(" Uso   : ${DISK_COLOR}${DISK_PERCENT}%${RESET}")
+
+NETWORK_BOX=()
+NETWORK_BOX+=(" Interface : $IFACE")
+NETWORK_BOX+=(" IPv4      : $IP")
+NETWORK_BOX+=(" Gateway   : $GATEWAY")
+NETWORK_BOX+=(" MAC       : $MAC")
+NETWORK_BOX+=(" Link      : $SPEED")
+NETWORK_BOX+=(" RX        : ${CYAN}${RX_DISPLAY}${RESET}")
+NETWORK_BOX+=(" TX        : ${CYAN}${TX_DISPLAY}${RESET}")
+
+SERVICES_BOX=()
+SERVICES_BOX+=(" SSH      : $SSH_STATUS")
+SERVICES_BOX+=(" Docker   : $DOCKER_STATUS")
+SERVICES_BOX+=(" Apache   : $APACHE_STATUS")
+SERVICES_BOX+=(" Nginx    : $NGINX_STATUS")
+SERVICES_BOX+=(" Firewall : $FIREWALL_STATUS")
+
+DOCKER_BOX=()
+
+if [ "$DOCKER_OK" -eq 1 ]; then
+    DOCKER_BOX+=(" Containers : ${PURPLE}${DOCKER_COUNT}${RESET}")
+    DOCKER_BOX+=(" Rodando    : ${PURPLE}${DOCKER_RUNNING}${RESET}")
+
+    if [ "$DOCKER_COUNT" -gt 0 ]; then
+        DOCKER_BOX+=(" Status     : ${PURPLE}ATIVO${RESET}")
+    else
+        DOCKER_BOX+=(" Status     : ${GRAY}VAZIO${RESET}")
+    fi
+else
+    DOCKER_BOX+=(" Status     : ${GRAY}INDISPONÍVEL${RESET}")
+    DOCKER_BOX+=(" Motivo     : ${GRAY}daemon parado/sem acesso${RESET}")
+    DOCKER_BOX+=("")
+fi
+
+SYSTEM_BOX=()
+SYSTEM_BOX+=(" Updates   : ${UPDATES_COLOR}${UPDATES}${RESET}")
+SYSTEM_BOX+=(" Segurança : ${SECURITY_COLOR}${SECURITY}${RESET}")
+SYSTEM_BOX+=(" Reboot    : $REBOOT")
+SYSTEM_BOX+=(" User      : ${CYAN}${LOGIN_USER}${RESET}")
+SYSTEM_BOX+=(" Host      : ${CYAN}${HOSTNAME}${RESET}")
+
+# ============================================================
+# LIMPA TERMINAL
+#
+# So limpa se estiver num terminal de verdade. Rodando como
+# MOTD o "clear" do V7 apagava a saida do proprio login.
+# ============================================================
+
+if [ -t 1 ] && [ "$1" != "--no-clear" ]; then
+    clear
+fi
+
+# ============================================================
+# CABECALHO
+# ============================================================
+
+ART=(
+'███████╗██████╗ ██████╗ ██╗      █████╗ ██╗   ██╗███████╗██████╗ '
+'██╔════╝██╔══██╗██╔══██╗██║     ██╔══██╗╚██╗ ██╔╝██╔════╝██╔══██╗'
+'███████╗██████╔╝██████╔╝██║     ███████║ ╚████╔╝ █████╗  ██████╔╝'
+'╚════██║██╔══██╗██╔═══╝ ██║     ██╔══██║  ╚██╔╝  ██╔══╝  ██╔══██╗'
+'███████║██║  ██║██║     ███████╗██║  ██║   ██║   ███████╗██║  ██║'
+'╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝'
+)
+
+printf "\n"
+
+printf "%b" "$BLUE"
+box_top "$HDR_INNER"
+printf "%b\n" "$RESET"
+
+printf "%b" "$BLUE"
+box_line_center "" "$HDR_INNER"
+printf "%b\n" "$RESET"
+
+for LINE in "${ART[@]}"; do
+    printf "%b" "$BLUE"
+    box_line_center "${CYAN}${BOLD}${LINE}${RESET}" "$HDR_INNER"
+    printf "%b\n" "$RESET"
+done
+
+printf "%b" "$BLUE"
+box_line_center "${GRAY}PAINEL DE SERVIDOR${RESET}" "$HDR_INNER"
+printf "%b\n" "$RESET"
+
+printf "%b" "$BLUE"
+box_mid "$HDR_INNER"
+printf "%b\n" "$RESET"
+
+printf "%b" "$BLUE"
+box_line "$(printf ' %bSERVER:%b %-20s %bIP:%b %-20s %bUSER:%b %s' \
+    "$CYAN$BOLD" "$RESET" "$HOSTNAME" \
+    "$CYAN$BOLD" "$RESET" "$IP" \
+    "$CYAN$BOLD" "$RESET" "$LOGIN_USER")" "$HDR_INNER"
+printf "%b\n" "$RESET"
+
+printf "%b" "$BLUE"
+box_bottom "$HDR_INNER"
+printf "%b\n" "$RESET"
+
+printf "\n"
+
+# ============================================================
+# PAINEL
+# ============================================================
+
+render_pair "SISTEMA" "RECURSOS" SYS_LEFT RES_RIGHT
+printf "\n"
+
+render_pair "CPU POR NÚCLEO" "DISCO" CPU_BOX DISK_BOX
+printf "\n"
+
+render_pair "REDE" "SERVIÇOS" NETWORK_BOX SERVICES_BOX
+printf "\n"
+
+render_pair "DOCKER" "SISTEMA" DOCKER_BOX SYSTEM_BOX
+printf "\n"
+
+# ============================================================
+# RODAPE
+# ============================================================
+
+printf "  %bSRPLAYER v8 • %s • %s • %s%b\n" \
+    "$GRAY" "$OS" "$LOGIN_USER" "$(date '+%d/%m/%Y %H:%M:%S')" "$RESET"
+
+printf "\n"
+
